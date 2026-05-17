@@ -272,7 +272,7 @@ Database evolves due to new business requirement
 
 ---
 
-# 8. ▶️ LIQUIBASE COMMANDS
+# 8.  LIQUIBASE COMMANDS
 
 ---
 
@@ -389,7 +389,7 @@ liquibase rollbackCount 1 --defaultsFile=liquibase.properties
 
 ---
 
-# 11. 🚀 JENKINS CI/CD PIPELINE (UPDATED FINAL VERSION)
+# 11. JENKINS CI/CD PIPELINE (UPDATED FINAL VERSION)
 
 ```bash
 cat << 'EOF' > Jenkinsfile
@@ -476,7 +476,6 @@ Liquibase is a Java-based database version control tool that uses JDBC to connec
 
 # 14. 🏁 FINAL COMMAND SUMMARY
 
-```bash
 liquibase validate --defaultsFile=liquibase.properties
 
 <img width="1919" height="803" alt="image" src="https://github.com/user-attachments/assets/048945ec-82e8-4058-98ef-8e8312b6983d" />
@@ -496,4 +495,3 @@ psql -U admin -d appdb -h localhost
 
 <img width="960" height="443" alt="image" src="https://github.com/user-attachments/assets/b8453965-ce98-43db-8d9f-bfab550192fd" />
 
-```
