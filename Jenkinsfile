@@ -8,108 +8,51 @@ pipeline {
         DB_USER = "admin"
         DB_PASS = "admin"
 
-        LIQUIBASE_VERSION = "4.27.0"
-        WORKDIR = "${WORKSPACE}/liquibase-runtime"
+        REMOTE_HOST = "172.31.16.197"
+        WORKDIR = "/home/ubuntu/liquibase-enterprise-poc"
     }
 
     stages {
 
-        stage('Prepare Workspace') {
+        stage('Run Liquibase on Server') {
             steps {
-                sh """
-                rm -rf ${WORKDIR}
-                mkdir -p ${WORKDIR}
-                """
-            }
-        }
+                sshagent(['liquibase-ci-key']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_HOST} '
 
-        stage('Download Liquibase at Runtime') {
-            steps {
-                sh """
-                cd ${WORKDIR}
+                        set -e
 
-                echo "Downloading Liquibase..."
-                wget -q https://github.com/liquibase/liquibase/releases/download/v${LIQUIBASE_VERSION}/liquibase-${LIQUIBASE_VERSION}.tar.gz
+                        echo "Moving to Liquibase directory..."
+                        cd ${WORKDIR}
 
-                echo "Extracting..."
-                tar -xzf liquibase-${LIQUIBASE_VERSION}.tar.gz
+                        echo "Checking Liquibase version..."
+                        ./liquibase --version
 
-                chmod +x liquibase
-                ./liquibase --version
-                """
-            }
-        }
+                        echo "DB Connectivity Check..."
+                        PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "\\dt"
 
-        stage('Workspace Check') {
-            steps {
-                sh "ls -R"
-            }
-        }
+                        echo "Validate..."
+                        ./liquibase validate --defaultsFile=liquibase.properties
 
-        stage('DB Connectivity Check') {
-            steps {
-                sh """
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c '\\dt'
-                """
-            }
-        }
+                        echo "Check Locks..."
+                        ./liquibase list-locks --defaultsFile=liquibase.properties || true
 
-        stage('Liquibase Validate') {
-            steps {
-                sh """
-                ${WORKDIR}/liquibase validate --defaultsFile=liquibase.properties
-                """
-            }
-        }
+                        echo "Release Locks..."
+                        ./liquibase release-locks --defaultsFile=liquibase.properties || true
 
-        stage('Check DB Lock') {
-            steps {
-                sh """
-                ${WORKDIR}/liquibase list-locks --defaultsFile=liquibase.properties || true
-                """
-            }
-        }
+                        echo "Deploy Schema..."
+                        ./liquibase update --defaultsFile=liquibase.properties
 
-        stage('Release Lock') {
-            steps {
-                sh """
-                ${WORKDIR}/liquibase release-locks --defaultsFile=liquibase.properties || true
-                """
-            }
-        }
+                        echo "Verify Schema..."
+                        PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "\\d users"
 
-        stage('Deploy Schema') {
-            steps {
-                sh """
-                ${WORKDIR}/liquibase update --defaultsFile=liquibase.properties
-                """
-            }
-        }
+                        echo "History..."
+                        ./liquibase history --defaultsFile=liquibase.properties
 
-        stage('Verify Schema') {
-            steps {
-                sh """
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c '\\d users'
-                """
-            }
-        }
-
-        stage('Audit Check') {
-            steps {
-                sh """
-                ${WORKDIR}/liquibase history --defaultsFile=liquibase.properties
-                """
-            }
-        }
-
-        stage('Rollback (Disabled)') {
-            when {
-                expression { return false }
-            }
-            steps {
-                sh """
-                ${WORKDIR}/liquibase rollbackCount 1 --defaultsFile=liquibase.properties
-                """
+                        echo "DONE"
+                    '
+                    """
+                }
             }
         }
     }
@@ -117,28 +60,34 @@ pipeline {
     post {
 
         success {
-            echo "SUCCESS: Runtime Liquibase execution completed"
+            echo "SUCCESS: Liquibase deployment completed"
 
-            sh """
-            PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c 'SELECT count(*) FROM databasechangelog;'
-            """
+            sshagent(['liquibase-ci-key']) {
+                sh """
+                ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_HOST} '
+                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "SELECT count(*) FROM databasechangelog;"
+                '
+                """
+            }
         }
 
         failure {
             echo "FAILED: Debug mode"
 
-            sh """
-            ${WORKDIR}/liquibase status --defaultsFile=liquibase.properties || true
-            ${WORKDIR}/liquibase list-locks --defaultsFile=liquibase.properties || true
-            """
-
-            sh """
-            PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c '\\dt' || true
-            """
+            sshagent(['liquibase-ci-key']) {
+                sh """
+                ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_HOST} '
+                cd ${WORKDIR}
+                ./liquibase status --defaultsFile=liquibase.properties || true
+                ./liquibase list-locks --defaultsFile=liquibase.properties || true
+                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "\\dt" || true
+                '
+                """
+            }
         }
 
         always {
-            echo "Pipeline finished (runtime mode)"
+            echo "Pipeline finished"
         }
     }
 }
