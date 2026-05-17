@@ -17,12 +17,13 @@ pipeline {
     stages {
 
         stage('Run Liquibase on EC2 Server') {
+
             steps {
 
                 sshagent(['liquibase-ci-key']) {
 
-                    sh '''
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << 'EOF'
+                    sh """
+                    ssh -tt -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} /bin/bash << 'EOF'
 
                     set -e
 
@@ -30,86 +31,97 @@ pipeline {
                     echo "Connected to Liquibase EC2 Server"
                     echo "========================================="
 
-                    echo "Current User:"
                     whoami
+                    hostname
 
-                    echo "Moving to Liquibase directory..."
-                    cd /home/ubuntu/liquibase-enterprise-poc
+                    echo "========================================="
+                    echo "Move to Liquibase directory"
+                    echo "========================================="
 
-                    echo "Current Directory:"
+                    cd ${WORKDIR}
+
                     pwd
-
-                    echo "Directory Contents:"
                     ls -lah
 
                     echo "========================================="
                     echo "Liquibase Version"
                     echo "========================================="
+
                     ./liquibase --version
 
                     echo "========================================="
                     echo "Postgres Connectivity Check"
                     echo "========================================="
-                    PGPASSWORD=admin psql \
-                        -h localhost \
-                        -U admin \
-                        -d appdb \
-                        -c "\\dt"
+
+                    PGPASSWORD=${DB_PASS} psql \
+                      -h ${DB_HOST} \
+                      -U ${DB_USER} \
+                      -d ${DB_NAME} \
+                      -c "\\dt"
 
                     echo "========================================="
                     echo "Liquibase Validate"
                     echo "========================================="
+
                     ./liquibase validate \
-                        --defaultsFile=liquibase.properties
+                      --defaultsFile=liquibase.properties
 
                     echo "========================================="
-                    echo "Current DB Locks"
+                    echo "Check Existing Locks"
                     echo "========================================="
+
                     ./liquibase list-locks \
-                        --defaultsFile=liquibase.properties || true
+                      --defaultsFile=liquibase.properties || true
 
                     echo "========================================="
                     echo "Release Locks"
                     echo "========================================="
+
                     ./liquibase release-locks \
-                        --defaultsFile=liquibase.properties || true
+                      --defaultsFile=liquibase.properties || true
 
                     echo "========================================="
-                    echo "Liquibase Update"
+                    echo "Deploy Schema"
                     echo "========================================="
+
                     ./liquibase update \
-                        --defaultsFile=liquibase.properties
+                      --defaultsFile=liquibase.properties
 
                     echo "========================================="
                     echo "Verify users table"
                     echo "========================================="
-                    PGPASSWORD=admin psql \
-                        -h localhost \
-                        -U admin \
-                        -d appdb \
-                        -c "\\d users"
+
+                    PGPASSWORD=${DB_PASS} psql \
+                      -h ${DB_HOST} \
+                      -U ${DB_USER} \
+                      -d ${DB_NAME} \
+                      -c "\\d users"
 
                     echo "========================================="
                     echo "Liquibase History"
                     echo "========================================="
+
                     ./liquibase history \
-                        --defaultsFile=liquibase.properties
+                      --defaultsFile=liquibase.properties
 
                     echo "========================================="
                     echo "databasechangelog count"
                     echo "========================================="
-                    PGPASSWORD=admin psql \
-                        -h localhost \
-                        -U admin \
-                        -d appdb \
-                        -c "SELECT count(*) FROM databasechangelog;"
+
+                    PGPASSWORD=${DB_PASS} psql \
+                      -h ${DB_HOST} \
+                      -U ${DB_USER} \
+                      -d ${DB_NAME} \
+                      -c "SELECT count(*) FROM databasechangelog;"
 
                     echo "========================================="
                     echo "Liquibase Deployment SUCCESS"
                     echo "========================================="
 
+                    exit
+
 EOF
-                    '''
+                    """
                 }
             }
         }
