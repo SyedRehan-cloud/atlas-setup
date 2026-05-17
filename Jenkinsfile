@@ -2,56 +2,114 @@ pipeline {
     agent any
 
     environment {
+        REMOTE_HOST = "172.31.16.197"
+        REMOTE_USER = "ubuntu"
+
         DB_HOST = "localhost"
         DB_PORT = "5432"
         DB_NAME = "appdb"
         DB_USER = "admin"
         DB_PASS = "admin"
 
-        REMOTE_HOST = "172.31.16.197"
         WORKDIR = "/home/ubuntu/liquibase-enterprise-poc"
     }
 
     stages {
 
-        stage('Run Liquibase on Server') {
+        stage('Run Liquibase on EC2 Server') {
             steps {
+
                 sshagent(['liquibase-ci-key']) {
-                    sh """
-                    ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_HOST} '
 
-                        set -e
+                    sh '''
+                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << 'EOF'
 
-                        echo "Moving to Liquibase directory..."
-                        cd ${WORKDIR}
+                    set -e
 
-                        echo "Checking Liquibase version..."
-                        ./liquibase --version
+                    echo "========================================="
+                    echo "Connected to Liquibase EC2 Server"
+                    echo "========================================="
 
-                        echo "DB Connectivity Check..."
-                        PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "\\dt"
+                    echo "Current User:"
+                    whoami
 
-                        echo "Validate..."
-                        ./liquibase validate --defaultsFile=liquibase.properties
+                    echo "Moving to Liquibase directory..."
+                    cd /home/ubuntu/liquibase-enterprise-poc
 
-                        echo "Check Locks..."
-                        ./liquibase list-locks --defaultsFile=liquibase.properties || true
+                    echo "Current Directory:"
+                    pwd
 
-                        echo "Release Locks..."
-                        ./liquibase release-locks --defaultsFile=liquibase.properties || true
+                    echo "Directory Contents:"
+                    ls -lah
 
-                        echo "Deploy Schema..."
-                        ./liquibase update --defaultsFile=liquibase.properties
+                    echo "========================================="
+                    echo "Liquibase Version"
+                    echo "========================================="
+                    ./liquibase --version
 
-                        echo "Verify Schema..."
-                        PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "\\d users"
+                    echo "========================================="
+                    echo "Postgres Connectivity Check"
+                    echo "========================================="
+                    PGPASSWORD=admin psql \
+                        -h localhost \
+                        -U admin \
+                        -d appdb \
+                        -c "\\dt"
 
-                        echo "History..."
-                        ./liquibase history --defaultsFile=liquibase.properties
+                    echo "========================================="
+                    echo "Liquibase Validate"
+                    echo "========================================="
+                    ./liquibase validate \
+                        --defaultsFile=liquibase.properties
 
-                        echo "DONE"
-                    '
-                    """
+                    echo "========================================="
+                    echo "Current DB Locks"
+                    echo "========================================="
+                    ./liquibase list-locks \
+                        --defaultsFile=liquibase.properties || true
+
+                    echo "========================================="
+                    echo "Release Locks"
+                    echo "========================================="
+                    ./liquibase release-locks \
+                        --defaultsFile=liquibase.properties || true
+
+                    echo "========================================="
+                    echo "Liquibase Update"
+                    echo "========================================="
+                    ./liquibase update \
+                        --defaultsFile=liquibase.properties
+
+                    echo "========================================="
+                    echo "Verify users table"
+                    echo "========================================="
+                    PGPASSWORD=admin psql \
+                        -h localhost \
+                        -U admin \
+                        -d appdb \
+                        -c "\\d users"
+
+                    echo "========================================="
+                    echo "Liquibase History"
+                    echo "========================================="
+                    ./liquibase history \
+                        --defaultsFile=liquibase.properties
+
+                    echo "========================================="
+                    echo "databasechangelog count"
+                    echo "========================================="
+                    PGPASSWORD=admin psql \
+                        -h localhost \
+                        -U admin \
+                        -d appdb \
+                        -c "SELECT count(*) FROM databasechangelog;"
+
+                    echo "========================================="
+                    echo "Liquibase Deployment SUCCESS"
+                    echo "========================================="
+
+EOF
+                    '''
                 }
             }
         }
@@ -60,34 +118,15 @@ pipeline {
     post {
 
         success {
-            echo "SUCCESS: Liquibase deployment completed"
-
-            sshagent(['liquibase-ci-key']) {
-                sh """
-                ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_HOST} '
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "SELECT count(*) FROM databasechangelog;"
-                '
-                """
-            }
+            echo 'SUCCESS: Liquibase deployment completed successfully'
         }
 
         failure {
-            echo "FAILED: Debug mode"
-
-            sshagent(['liquibase-ci-key']) {
-                sh """
-                ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_HOST} '
-                cd ${WORKDIR}
-                ./liquibase status --defaultsFile=liquibase.properties || true
-                ./liquibase list-locks --defaultsFile=liquibase.properties || true
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c "\\dt" || true
-                '
-                """
-            }
+            echo 'FAILED: Liquibase deployment failed'
         }
 
         always {
-            echo "Pipeline finished"
+            echo 'Pipeline execution finished'
         }
     }
 }
