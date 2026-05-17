@@ -2,27 +2,51 @@ pipeline {
     agent any
 
     environment {
-        LIQUIBASE = "/opt/liquibase/liquibase"
-
         DB_HOST = "localhost"
         DB_PORT = "5432"
         DB_NAME = "appdb"
         DB_USER = "admin"
         DB_PASS = "admin"
 
-        PROPS = "liquibase.properties"
+        LIQUIBASE_VERSION = "4.27.0"
+        WORKDIR = "${WORKSPACE}/liquibase-runtime"
     }
 
     stages {
 
-        stage('Workspace Check') {
+        stage('Prepare Workspace') {
             steps {
-                sh 'echo "Workspace Contents:"'
-                sh 'ls -R'
+                sh """
+                rm -rf ${WORKDIR}
+                mkdir -p ${WORKDIR}
+                """
             }
         }
 
-        stage('DB Connectivity Check (No Prompt)') {
+        stage('Download Liquibase at Runtime') {
+            steps {
+                sh """
+                cd ${WORKDIR}
+
+                echo "Downloading Liquibase..."
+                wget -q https://github.com/liquibase/liquibase/releases/download/v${LIQUIBASE_VERSION}/liquibase-${LIQUIBASE_VERSION}.tar.gz
+
+                echo "Extracting..."
+                tar -xzf liquibase-${LIQUIBASE_VERSION}.tar.gz
+
+                chmod +x liquibase
+                ./liquibase --version
+                """
+            }
+        }
+
+        stage('Workspace Check') {
+            steps {
+                sh "ls -R"
+            }
+        }
+
+        stage('DB Connectivity Check') {
             steps {
                 sh """
                 PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c '\\dt'
@@ -33,61 +57,58 @@ pipeline {
         stage('Liquibase Validate') {
             steps {
                 sh """
-                ${LIQUIBASE} validate --defaultsFile=${PROPS}
+                ${WORKDIR}/liquibase validate --defaultsFile=liquibase.properties
                 """
             }
         }
 
-        stage('Check DB Lock (Safety Gate)') {
+        stage('Check DB Lock') {
             steps {
                 sh """
-                ${LIQUIBASE} list-locks --defaultsFile=${PROPS} || true
+                ${WORKDIR}/liquibase list-locks --defaultsFile=liquibase.properties || true
                 """
             }
         }
 
-        stage('Release Lock (Auto-Recovery)') {
+        stage('Release Lock') {
             steps {
                 sh """
-                ${LIQUIBASE} release-locks --defaultsFile=${PROPS} || true
+                ${WORKDIR}/liquibase release-locks --defaultsFile=liquibase.properties || true
                 """
             }
         }
 
-        stage('Deploy Schema (Incremental Migration)') {
+        stage('Deploy Schema') {
             steps {
                 sh """
-                ${LIQUIBASE} update --defaultsFile=${PROPS}
+                ${WORKDIR}/liquibase update --defaultsFile=liquibase.properties
                 """
             }
         }
 
-        stage('Post Deployment Verification') {
+        stage('Verify Schema') {
             steps {
                 sh """
                 PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c '\\d users'
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c 'SELECT * FROM users;'
                 """
             }
         }
 
-        stage('Audit Tracking (DATABASECHANGELOG)') {
+        stage('Audit Check') {
             steps {
                 sh """
-                ${LIQUIBASE} history --defaultsFile=${PROPS}
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c 'SELECT COUNT(*) FROM databasechangelog;'
-                PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c 'SELECT * FROM databasechangelog ORDER BY dateexecuted DESC LIMIT 5;'
+                ${WORKDIR}/liquibase history --defaultsFile=liquibase.properties
                 """
             }
         }
 
-        stage('Rollback (Manual Control Only)') {
+        stage('Rollback (Disabled)') {
             when {
                 expression { return false }
             }
             steps {
                 sh """
-                ${LIQUIBASE} rollbackCount 1 --defaultsFile=${PROPS}
+                ${WORKDIR}/liquibase rollbackCount 1 --defaultsFile=liquibase.properties
                 """
             }
         }
@@ -96,7 +117,7 @@ pipeline {
     post {
 
         success {
-            echo "PIPELINE SUCCESS: Migration completed successfully"
+            echo "SUCCESS: Runtime Liquibase execution completed"
 
             sh """
             PGPASSWORD=${DB_PASS} psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -c 'SELECT count(*) FROM databasechangelog;'
@@ -104,11 +125,11 @@ pipeline {
         }
 
         failure {
-            echo "PIPELINE FAILED: Debugging Liquibase + DB state"
+            echo "FAILED: Debug mode"
 
             sh """
-            ${LIQUIBASE} status --defaultsFile=${PROPS} || true
-            ${LIQUIBASE} list-locks --defaultsFile=${PROPS} || true
+            ${WORKDIR}/liquibase status --defaultsFile=liquibase.properties || true
+            ${WORKDIR}/liquibase list-locks --defaultsFile=liquibase.properties || true
             """
 
             sh """
@@ -117,7 +138,7 @@ pipeline {
         }
 
         always {
-            echo "Pipeline execution finished (audit-safe)"
+            echo "Pipeline finished (runtime mode)"
         }
     }
 }
