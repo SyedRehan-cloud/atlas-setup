@@ -1,0 +1,47 @@
+pipeline {
+
+    agent any
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git 'https://github.com/your-repo/liquibase-poc.git'
+            }
+        }
+
+        stage('Install Liquibase') {
+            steps {
+                sh '''
+                    wget https://github.com/liquibase/liquibase/releases/download/v4.25.0/liquibase-4.25.0.tar.gz
+                    tar -xvzf liquibase-4.25.0.tar.gz
+                    mv liquibase liquibase-cli
+                '''
+            }
+        }
+
+        stage('Validate Changes') {
+            steps {
+                sh './liquibase-cli/liquibase validate --defaultsFile=liquibase.properties'
+            }
+        }
+
+        stage('Apply Migrations') {
+            steps {
+                sh './liquibase-cli/liquibase update --defaultsFile=liquibase.properties'
+            }
+        }
+
+        stage('Audit History') {
+            steps {
+                sh './liquibase-cli/liquibase history --defaultsFile=liquibase.properties'
+            }
+        }
+
+        stage('Rollback (manual test)') {
+            steps {
+                sh './liquibase-cli/liquibase rollbackCount 1 --defaultsFile=liquibase.properties'
+            }
+        }
+    }
+}

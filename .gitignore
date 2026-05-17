@@ -1,0 +1,11 @@
+# Liquibase distribution (DO NOT PUSH)
+internal/
+lib/
+licenses/
+examples/
+*.tar.gz
+*.bat
+
+# system files
+.DS_Store
+*.log
