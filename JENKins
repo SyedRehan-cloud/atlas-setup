@@ -162,11 +162,26 @@ URL         : ${env.BUILD_URL}
                             input message: "DROP COLUMN detected in ${file}. Approve?"
                         }
 
-                        /* ================= TRUNCATE ================= */
+                        /* ================= TRUNCATE CONTROL ================= */
 
                         if (content.contains("truncate")) {
-                            echo "TRUNCATE detected (BLOCKED but not failing pipeline)"
-                            env.RISK = "CRITICAL"
+
+                            echo "TRUNCATE detected in ${file}"
+
+                            if (params.ENVIRONMENT == 'PRODUCTION') {
+
+                                error("""
+TRUNCATE is BLOCKED in PRODUCTION
+
+File: ${file}
+Environment: ${params.ENVIRONMENT}
+""")
+
+                            } else {
+
+                                echo "TRUNCATE allowed in ${params.ENVIRONMENT}"
+                                env.RISK = "HIGH"
+                            }
                         }
 
                         /* ================= UPDATE / DELETE (FIXED) ================= */
