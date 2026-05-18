@@ -1,3 +1,4 @@
+
 pipeline {
 
     agent any
@@ -49,7 +50,6 @@ pipeline {
             steps {
                 script {
 
-                    // SAFE METHOD (NO PLUGINS, NO SANDBOX ISSUES)
                     env.TRIGGERED_BY = "${env.BUILD_USER ?: 'Unknown User'}"
 
                     currentBuild.description =
@@ -64,6 +64,49 @@ pipeline {
                     echo "Action       : ${params.ACTION}"
                     echo "Environment  : ${params.ENVIRONMENT}"
                     echo "======================================="
+                }
+            }
+        }
+
+        /* =========================
+           NEW: NOTIFICATION STAGE
+           ========================= */
+        stage('Notify Admin (Email + Slack)') {
+
+            when {
+                expression {
+                    params.ENVIRONMENT in ['STAGING', 'PRODUCTION']
+                }
+            }
+
+            steps {
+
+                script {
+
+                    def message = """
+⚠ LIQUIBASE DEPLOYMENT APPROVAL REQUIRED
+
+Triggered By : ${env.TRIGGERED_BY}
+Action       : ${params.ACTION}
+Environment  : ${params.ENVIRONMENT}
+
+Jenkins Job  : ${env.JOB_NAME}
+Build URL    : ${env.BUILD_URL}
+"""
+
+                    // EMAIL NOTIFICATION
+                    emailext (
+                        to: "rehan.ali9325@gmail.com",
+                        subject: "🚨 Jenkins Approval Required - ${params.ENVIRONMENT}",
+                        body: message
+                    )
+
+                    // SLACK NOTIFICATION (requires Slack plugin configured)
+                    slackSend (
+                        channel: "#deployments",
+                        color: "#FFA500",
+                        message: message
+                    )
                 }
             }
         }
@@ -88,7 +131,7 @@ Triggered By : ${env.TRIGGERED_BY}
 Action       : ${params.ACTION}
 Environment  : ${params.ENVIRONMENT}
 
-Approve deployment?
+Approve or Abort in Jenkins UI
                         """,
                         ok: 'Approve Deployment',
                         submitter: 'admin,newadmin,devops,release-manager'
