@@ -11,22 +11,13 @@ pipeline {
 
         choice(
             name: 'ACTION',
-            choices: [
-                'VALIDATE',
-                'UPDATESQL',
-                'UPDATE',
-                'ROLLBACK'
-            ],
+            choices: ['VALIDATE', 'UPDATESQL', 'UPDATE', 'ROLLBACK'],
             description: 'Select Liquibase operation'
         )
 
         choice(
             name: 'ENVIRONMENT',
-            choices: [
-                'DEV',
-                'STAGING',
-                'PRODUCTION'
-            ],
+            choices: ['DEV', 'STAGING', 'PRODUCTION'],
             description: 'Target deployment environment'
         )
 
@@ -54,13 +45,12 @@ pipeline {
     stages {
 
         stage('Capture Build User') {
+
             steps {
                 script {
 
-                    // No plugin required (reliable fallback)
-                    def cause = currentBuild.rawBuild.getCause(hudson.model.Cause.UserIdCause)
-
-                    env.TRIGGERED_BY = cause?.getUserName() ?: "Automated Trigger"
+                    // SAFE METHOD (NO PLUGINS, NO SANDBOX ISSUES)
+                    env.TRIGGERED_BY = "${env.BUILD_USER ?: 'Unknown User'}"
 
                     currentBuild.description =
                         "Triggered By: ${env.TRIGGERED_BY} | " +
@@ -92,13 +82,13 @@ pipeline {
 
                     input(
                         message: """
-APPROVAL REQUIRED FOR DEPLOYMENT
+APPROVAL REQUIRED
 
 Triggered By : ${env.TRIGGERED_BY}
 Action       : ${params.ACTION}
 Environment  : ${params.ENVIRONMENT}
 
-Approve to continue Liquibase deployment?
+Approve deployment?
                         """,
                         ok: 'Approve Deployment',
                         submitter: 'admin,newadmin,devops,release-manager'
@@ -126,23 +116,8 @@ Approve to continue Liquibase deployment?
                         echo "Environment  : ${params.ENVIRONMENT}"
                         echo "Execution At : \$(date)"
 
-                        echo "========================================="
-                        echo "Move to Working Directory"
-                        echo "========================================="
-
                         cd ${WORKDIR}
-                        pwd
-                        ls -lah
-
-                        echo "========================================="
-                        echo "Liquibase Version"
-                        echo "========================================="
-
                         ./liquibase --version
-
-                        echo "========================================="
-                        echo "Postgres Connectivity Check"
-                        echo "========================================="
 
                         PGPASSWORD=${DB_PASS} psql \
                           -h ${DB_HOST} \
@@ -150,21 +125,8 @@ Approve to continue Liquibase deployment?
                           -d ${DB_NAME} \
                           -c "\\\\dt"
 
-                        echo "========================================="
-                        echo "Liquibase Validate"
-                        echo "========================================="
-
                         ./liquibase validate
-
-                        echo "========================================="
-                        echo "Preview SQL"
-                        echo "========================================="
-
                         ./liquibase updateSQL
-
-                        echo "========================================="
-                        echo "Execute Requested Action"
-                        echo "========================================="
 
                         if [ "${params.ACTION}" = "VALIDATE" ]; then
                             ./liquibase validate
@@ -179,25 +141,13 @@ Approve to continue Liquibase deployment?
                             ./liquibase rollbackCount ${params.ROLLBACK_COUNT}
                         fi
 
-                        echo "========================================="
-                        echo "Liquibase History"
-                        echo "========================================="
-
                         ./liquibase history
-
-                        echo "========================================="
-                        echo "DATABASECHANGELOG Count"
-                        echo "========================================="
 
                         PGPASSWORD=${DB_PASS} psql \
                           -h ${DB_HOST} \
                           -U ${DB_USER} \
                           -d ${DB_NAME} \
                           -c "SELECT COUNT(*) FROM databasechangelog;"
-
-                        echo "========================================="
-                        echo "Deployment Completed"
-                        echo "========================================="
                     '
                     """
                 }
