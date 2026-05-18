@@ -28,29 +28,10 @@ pipeline {
             description: 'Target environment'
         )
 
-        string(
-            name: 'ROLLBACK_COUNT',
-            defaultValue: '1',
-            description: 'Rollback count'
-        )
-
-        string(
-            name: 'ROLLBACK_TAG',
-            defaultValue: '',
-            description: 'Rollback tag'
-        )
-
-        string(
-            name: 'CHANGESET_ID',
-            defaultValue: '',
-            description: 'Rollback changeset ID'
-        )
-
-        string(
-            name: 'CHANGESET_AUTHOR',
-            defaultValue: '',
-            description: 'Rollback changeset Author'
-        )
+        string(name: 'ROLLBACK_COUNT', defaultValue: '1')
+        string(name: 'ROLLBACK_TAG', defaultValue: '')
+        string(name: 'CHANGESET_ID', defaultValue: '')
+        string(name: 'CHANGESET_AUTHOR', defaultValue: '')
     }
 
     environment {
@@ -64,19 +45,14 @@ pipeline {
         DB_PASS = "admin"
 
         WORKDIR = "/home/ubuntu/liquibase-enterprise-poc"
-
         LIQUIBASE_CMD = "./liquibase"
     }
 
     stages {
 
-        /* =========================================================
-           AUDIT
-        ========================================================= */
+        /* ================= AUDIT ================= */
         stage('Audit') {
-
             steps {
-
                 script {
 
                     env.TRIGGERED_BY =
@@ -104,170 +80,95 @@ URL         : ${env.BUILD_URL}
             }
         }
 
-        /* =========================================================
-           POLICY ENGINE
-        ========================================================= */
+        /* ================= POLICY ================= */
         stage('Policy Engine') {
-
             steps {
-
                 script {
 
                     env.RISK = "LOW"
 
-                    if (params.ENVIRONMENT == 'STAGING') {
-                        env.RISK = "MEDIUM"
-                    }
-
-                    if (params.ENVIRONMENT == 'PRODUCTION') {
-                        env.RISK = "HIGH"
-                    }
-
-                    if (params.ACTION.contains("ROLLBACK")) {
-                        env.RISK = "HIGH"
-                    }
+                    if (params.ENVIRONMENT == 'STAGING') env.RISK = "MEDIUM"
+                    if (params.ENVIRONMENT == 'PRODUCTION') env.RISK = "HIGH"
+                    if (params.ACTION.contains("ROLLBACK")) env.RISK = "HIGH"
 
                     echo "Risk Level: ${env.RISK}"
                 }
             }
         }
 
-        /* =========================================================
-           SQL GOVERNANCE VALIDATION
-        ========================================================= */
+        /* ================= GOVERNANCE ================= */
         stage('SQL Governance Validation') {
 
             steps {
 
                 script {
 
-                    def sqlFiles = sh(
-                        script: """
-                        find . \\( -name "*.sql" -o -name "*.xml" \\)
-                        """,
+                    def files = sh(
+                        script: "find . \\( -name '*.sql' -o -name '*.xml' \\)",
                         returnStdout: true
                     ).trim().split("\n")
 
-                    sqlFiles.each { file ->
+                    files.each { file ->
 
-                        if (!file?.trim()) {
-                            return
-                        }
+                        if (!file?.trim()) return
 
                         echo "Scanning: ${file}"
 
                         def content = readFile(file).toLowerCase()
 
-                        /* =========================================
-                           CREATE TABLE
-                        ========================================= */
+                        /* ================= SAFE FLAGS ================= */
 
-                        if (content.contains("create table")) {
+                        def isXML = file.endsWith(".xml")
+
+                        /* ================= CREATE ================= */
+
+                        if (content.contains("create table"))
                             echo "CREATE TABLE detected"
-                        }
 
-                        /* =========================================
-                           CREATE INDEX
-                        ========================================= */
-
-                        if (content.contains("create index")) {
+                        if (content.contains("create index"))
                             echo "CREATE INDEX detected"
-                        }
 
-                        /* =========================================
-                           CONSTRAINTS
-                        ========================================= */
+                        /* ================= CONSTRAINT ================= */
 
-                        if (
-                            content.contains("constraint") ||
-                            content.contains("primary key") ||
-                            content.contains("foreign key")
-                        ) {
+                        if (content.contains("primary key") ||
+                            content.contains("foreign key") ||
+                            content.contains("constraint"))
+                            echo "CONSTRAINT detected"
 
-                            echo "CONSTRAINT change detected"
-                        }
+                        /* ================= ALTER / MODIFY ================= */
 
-                        /* =========================================
-                           ADD COLUMN
-                        ========================================= */
-
-                        if (
-                            content.contains("add column") ||
-                            content.contains("addcolumn")
-                        ) {
-
-                            echo "ADD COLUMN detected"
-                        }
-
-                        /* =========================================
-                           MODIFY DATATYPE
-                        ========================================= */
-
-                        if (
+                        if (content.contains("alter") ||
                             content.contains("modify") ||
-                            content.contains("alter column") ||
-                            content.contains("datatype")
-                        ) {
+                            content.contains("datatype")) {
 
-                            echo "MODIFY DATATYPE detected"
+                            echo "ALTER/MODIFY detected"
 
                             if (params.ENVIRONMENT != 'DEV') {
-
-                                input(
-                                    message:
-                                    "Datatype modification detected in ${file}. Approve?"
-                                )
+                                input message: "ALTER detected in ${file}. Approve?"
                             }
                         }
 
-                        /* =========================================
-                           DROP TABLE
-                        ========================================= */
+                        /* ================= DROP ================= */
 
                         if (content.contains("drop table")) {
 
-                            env.RISK = "CRITICAL"
-
-                            if (params.ENVIRONMENT == 'PRODUCTION') {
+                            if (params.ENVIRONMENT == 'PRODUCTION')
                                 error("DROP TABLE blocked in PROD")
-                            }
 
-                            input(
-                                message:
-                                "DROP TABLE detected in ${file}. Approve?"
-                            )
+                            input message: "DROP TABLE detected in ${file}. Approve?"
                         }
-
-                        /* =========================================
-                           DROP COLUMN
-                        ========================================= */
 
                         if (content.contains("drop column")) {
-
-                            env.RISK = "HIGH"
-
-                            input(
-                                message:
-                                "DROP COLUMN detected in ${file}. Approve?"
-                            )
+                            input message: "DROP COLUMN detected in ${file}. Approve?"
                         }
 
-                        /* =========================================
-                           TRUNCATE BLOCK
-                        ========================================= */
+                        /* ================= TRUNCATE ================= */
 
                         if (content.contains("truncate")) {
-
-                            error("""
-TRUNCATE operation detected in ${file}
-
-TRUNCATE is NOT allowed in any environment.
-""")
+                            error("TRUNCATE is NOT allowed anywhere")
                         }
 
-                        /* =========================================
-                           UPDATE WITHOUT WHERE
-                        ========================================= */
+                        /* ================= UPDATE / DELETE (FIXED) ================= */
 
                         def unsafeUpdate =
                             content.contains("update") &&
@@ -275,94 +176,42 @@ TRUNCATE is NOT allowed in any environment.
                             !content.contains(" where ")
 
                         if (unsafeUpdate) {
-
-                            error("""
-Unsafe UPDATE without WHERE detected in ${file}
-""")
+                            error("Unsafe UPDATE without WHERE in ${file}")
                         }
-
-                        /* =========================================
-                           DELETE WITHOUT WHERE
-                        ========================================= */
 
                         def unsafeDelete =
                             content.contains("delete from") &&
                             !content.contains(" where ")
 
                         if (unsafeDelete) {
-
-                            error("""
-Unsafe DELETE without WHERE detected in ${file}
-""")
+                            error("Unsafe DELETE without WHERE in ${file}")
                         }
 
-                        /* =========================================
-                           STORED PROCEDURES
-                        ========================================= */
+                        /* ================= PROCEDURE ================= */
 
-                        if (
-                            content.contains("procedure") ||
-                            content.contains("create or replace procedure")
-                        ) {
-
-                            echo "Stored Procedure deployment detected"
+                        if (content.contains("procedure")) {
+                            echo "PROCEDURE detected"
 
                             if (params.ENVIRONMENT == 'PRODUCTION') {
-
-                                input(
-                                    message:
-                                    "Stored Procedure deployment detected in PROD. Approve?"
-                                )
+                                input message: "Stored Procedure in PROD. Approve?"
                             }
                         }
 
-                        /* =========================================
-                           FUNCTIONS
-                        ========================================= */
+                        /* ================= FUNCTION ================= */
 
-                        if (
-                            content.contains("function") ||
-                            content.contains("create or replace function")
-                        ) {
+                        if (content.contains("function"))
+                            echo "FUNCTION detected"
 
-                            echo "Function deployment detected"
-                        }
+                        /* ================= ROLLBACK CHECK (FIXED) ================= */
 
-                        /* =========================================
-                           ROLLBACK VALIDATION
-                        ========================================= */
-
-                        /*
-                           Rollback required ONLY for risky operations
-                        */
-
-                        def riskyOperation =
-                            content.contains("drop") ||
-                            content.contains("alter table") ||
-                            content.contains("update") ||
-                            content.contains("delete") ||
-                            content.contains("procedure") ||
-                            content.contains("function")
-
-                        if (
-                            file.endsWith(".xml") &&
+                        if (isXML &&
                             content.contains("<changeset") &&
-                            riskyOperation &&
-                            !content.contains("<rollback>")
-                        ) {
+                            !content.contains("<rollback>")) {
 
                             error("""
-Rollback block missing in risky changeset:
+Rollback missing in ${file}
 
-${file}
-
-Rollback is required for:
-- DROP
-- ALTER
-- UPDATE
-- DELETE
-- PROCEDURE
-- FUNCTION changes
+All Liquibase changesets MUST include rollback.
 """)
                         }
                     }
@@ -370,155 +219,49 @@ Rollback is required for:
             }
         }
 
-        /* =========================================================
-           PRODUCTION SAFEGUARDS
-        ========================================================= */
+        /* ================= PROD SAFEGUARD ================= */
         stage('Production Safeguards') {
 
-            when {
-                expression {
-                    params.ENVIRONMENT == 'PRODUCTION'
-                }
-            }
+            when { expression { params.ENVIRONMENT == 'PRODUCTION' } }
 
             steps {
 
                 script {
 
-                    echo "Applying Production Safeguards"
-
-                    if (
-                        params.ACTION == 'ROLLBACK_COUNT' ||
-                        params.ACTION == 'ROLLBACK_TAG' ||
-                        params.ACTION == 'ROLLBACK_CHANGESET'
-                    ) {
-
-                        error("""
-Rollback operations are BLOCKED in PRODUCTION
-""")
+                    if (params.ACTION.startsWith("ROLLBACK")) {
+                        error("Rollback blocked in PROD")
                     }
 
-                    input(
-                        message: """
-================ PRODUCTION APPROVAL ================
-
-Risk Level : ${env.RISK}
-
-You are deploying to PRODUCTION.
-
-Please confirm CAB approval exists.
-
-====================================================
-""",
-                        ok: "APPROVE PROD DEPLOYMENT"
-                    )
+                    input message: "Confirm PROD deployment (CAB approval required)"
                 }
             }
         }
 
-        /* =========================================================
-           NOTIFICATION
-        ========================================================= */
-        stage('Notify Admin') {
-
-            when {
-                expression { params.ENVIRONMENT != 'DEV' }
-            }
-
-            steps {
-
-                script {
-
-                    def msg = """
-🚨 LIQUIBASE APPROVAL REQUIRED
-
-${env.AUDIT}
-
-Risk Level : ${env.RISK}
-
-Approve in Jenkins UI
-"""
-
-                    emailext(
-                        to: "rehan.ali9325@gmail.com",
-                        subject:
-                        "Liquibase Approval - ${params.ENVIRONMENT}",
-                        body: msg
-                    )
-
-                    try {
-
-                        slackSend(
-                            channel: "#deployments",
-                            color: "#FFA500",
-                            message: msg
-                        )
-
-                    } catch (e) {
-
-                        echo "Slack failed: ${e}"
-                    }
-                }
-            }
-        }
-
-        /* =========================================================
-           APPROVAL GATE
-        ========================================================= */
+        /* ================= APPROVAL ================= */
         stage('Approval Gate') {
 
-            when {
-                expression { params.ENVIRONMENT != 'DEV' }
-            }
+            when { expression { params.ENVIRONMENT != 'DEV' } }
 
             steps {
-
                 timeout(time: 60, unit: 'MINUTES') {
-
-                    input(
-                        message: """
-================ APPROVAL REQUIRED ================
-
-${env.AUDIT}
-
-Risk Level: ${env.RISK}
-
-Approve or Abort deployment
-
-==================================================
-""",
-                        ok: "APPROVE"
-                    )
+                    input message: "Approve deployment?"
                 }
             }
         }
 
-        /* =========================================================
-           DATABASE BACKUP
-        ========================================================= */
+        /* ================= BACKUP ================= */
         stage('Database Backup') {
 
-            when {
-                expression {
-                    params.ENVIRONMENT == 'PRODUCTION'
-                }
-            }
+            when { expression { params.ENVIRONMENT == 'PRODUCTION' } }
 
             steps {
-
                 sshagent(credentials: ['liquibase-ci-key']) {
-
                     sh """
-                    ssh -T ${REMOTE_USER}@${REMOTE_HOST} '
-
+                    ssh ${REMOTE_USER}@${REMOTE_HOST} '
                         mkdir -p ${WORKDIR}/backup
-
                         export PGPASSWORD=${DB_PASS}
 
-                        pg_dump \
-                        -h ${DB_HOST} \
-                        -U ${DB_USER} \
-                        ${DB_NAME} \
+                        pg_dump -h ${DB_HOST} -U ${DB_USER} ${DB_NAME} \
                         > ${WORKDIR}/backup/backup_\$(date +%F_%H-%M-%S).sql
                     '
                     """
@@ -526,52 +269,40 @@ Approve or Abort deployment
             }
         }
 
-        /* =========================================================
-           DEPLOY
-        ========================================================= */
+        /* ================= DEPLOY ================= */
         stage('Deploy') {
 
             steps {
-
                 sshagent(credentials: ['liquibase-ci-key']) {
 
                     sh """
-                    ssh -T ${REMOTE_USER}@${REMOTE_HOST} '
-
+                    ssh ${REMOTE_USER}@${REMOTE_HOST} '
                         set -e
-
                         cd ${WORKDIR}
 
                         echo "${env.AUDIT}"
 
                         if [ "${params.ACTION}" = "VALIDATE" ]; then
-
                             ${LIQUIBASE_CMD} validate
 
                         elif [ "${params.ACTION}" = "UPDATESQL" ]; then
-
                             ${LIQUIBASE_CMD} updateSQL
 
                         elif [ "${params.ACTION}" = "UPDATE" ]; then
-
                             ${LIQUIBASE_CMD} validate
                             ${LIQUIBASE_CMD} updateSQL
                             ${LIQUIBASE_CMD} update
 
                         elif [ "${params.ACTION}" = "ROLLBACK_COUNT" ]; then
-
                             ${LIQUIBASE_CMD} rollbackCount ${params.ROLLBACK_COUNT}
 
                         elif [ "${params.ACTION}" = "ROLLBACK_TAG" ]; then
-
                             ${LIQUIBASE_CMD} rollback ${params.ROLLBACK_TAG}
 
                         elif [ "${params.ACTION}" = "ROLLBACK_CHANGESET" ]; then
-
                             ${LIQUIBASE_CMD} rollbackOneChangeSet \
                             --changesetId=${params.CHANGESET_ID} \
                             --changesetAuthor=${params.CHANGESET_AUTHOR}
-
                         fi
 
                         ${LIQUIBASE_CMD} history
@@ -580,74 +311,20 @@ Approve or Abort deployment
                 }
             }
         }
-
-        /* =========================================================
-           TAG RELEASE
-        ========================================================= */
-        stage('Tag Release') {
-
-            when {
-                expression {
-                    params.ACTION == 'UPDATE'
-                }
-            }
-
-            steps {
-
-                sshagent(credentials: ['liquibase-ci-key']) {
-
-                    sh """
-                    ssh -T ${REMOTE_USER}@${REMOTE_HOST} '
-
-                        cd ${WORKDIR}
-
-                        ${LIQUIBASE_CMD} tag release_${BUILD_NUMBER}
-                    '
-                    """
-                }
-            }
-        }
     }
 
-    /* =============================================================
-       POST
-    ============================================================= */
     post {
 
         success {
-
-            echo """
-=================================================
-DEPLOYMENT SUCCESS
-=================================================
-"""
+            echo "DEPLOYMENT SUCCESS"
         }
 
         failure {
-
-            echo """
-=================================================
-DEPLOYMENT FAILED
-=================================================
-"""
-        }
-
-        aborted {
-
-            echo """
-=================================================
-DEPLOYMENT ABORTED
-=================================================
-"""
+            echo "DEPLOYMENT FAILED"
         }
 
         always {
-
-            archiveArtifacts(
-                artifacts: '**/*.log',
-                fingerprint: true,
-                allowEmptyArchive: true
-            )
+            archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
         }
     }
 }
