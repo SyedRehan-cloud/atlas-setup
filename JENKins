@@ -50,7 +50,6 @@ pipeline {
 
     stages {
 
-        /* ================= AUDIT ================= */
         stage('Audit') {
             steps {
                 script {
@@ -80,7 +79,6 @@ URL         : ${env.BUILD_URL}
             }
         }
 
-        /* ================= POLICY ================= */
         stage('Policy Engine') {
             steps {
                 script {
@@ -96,14 +94,11 @@ URL         : ${env.BUILD_URL}
             }
         }
 
-        /* ================= GOVERNANCE ================= */
         stage('SQL Governance Validation') {
 
             steps {
 
                 script {
-
-                    /* ================= POLICY MATRIX ================= */
 
                     def POLICY = [
                         DEV: [
@@ -140,8 +135,6 @@ URL         : ${env.BUILD_URL}
                         }
                     }
 
-                    /* ================= FILE SCAN ================= */
-
                     def files = sh(
                         script: "find . \\( -name '*.sql' -o -name '*.xml' \\)",
                         returnStdout: true
@@ -154,10 +147,7 @@ URL         : ${env.BUILD_URL}
                         echo "Scanning: ${file}"
 
                         def content = readFile(file).toLowerCase()
-
                         def isXML = file.endsWith(".xml")
-
-                        /* ================= CREATE ================= */
 
                         if (content.contains("create table"))
                             echo "CREATE TABLE detected"
@@ -165,14 +155,10 @@ URL         : ${env.BUILD_URL}
                         if (content.contains("create index"))
                             echo "CREATE INDEX detected"
 
-                        /* ================= CONSTRAINT ================= */
-
                         if (content.contains("primary key") ||
                             content.contains("foreign key") ||
                             content.contains("constraint"))
                             echo "CONSTRAINT detected"
-
-                        /* ================= ALTER / MODIFY ================= */
 
                         if (content.contains("alter") ||
                             content.contains("modify") ||
@@ -185,8 +171,6 @@ URL         : ${env.BUILD_URL}
                             }
                         }
 
-                        /* ================= DROP ================= */
-
                         if (content.contains("drop table")) {
                             checkRule("dropTable", "DROP TABLE detected", file)
                         }
@@ -195,14 +179,10 @@ URL         : ${env.BUILD_URL}
                             input message: "DROP COLUMN detected in ${file}. Approve?"
                         }
 
-                        /* ================= TRUNCATE ================= */
-
                         if (content.contains("truncate")) {
                             echo "TRUNCATE detected in ${file}"
                             checkRule("truncate", "TRUNCATE detected", file)
                         }
-
-                        /* ================= UPDATE / DELETE ================= */
 
                         def unsafeUpdate =
                             content.contains("update") &&
@@ -221,8 +201,6 @@ URL         : ${env.BUILD_URL}
                             checkRule("unsafeDelete", "Unsafe DELETE without WHERE", file)
                         }
 
-                        /* ================= PROCEDURE ================= */
-
                         if (content.contains("procedure")) {
                             echo "PROCEDURE detected"
 
@@ -231,12 +209,8 @@ URL         : ${env.BUILD_URL}
                             }
                         }
 
-                        /* ================= FUNCTION ================= */
-
                         if (content.contains("function"))
                             echo "FUNCTION detected"
-
-                        /* ================= ROLLBACK CHECK ================= */
 
                         if (isXML &&
                             content.contains("<changeset") &&
@@ -253,13 +227,10 @@ All Liquibase changesets MUST include rollback.
             }
         }
 
-        /* ================= PROD SAFEGUARD ================= */
         stage('Production Safeguards') {
-
             when { expression { params.ENVIRONMENT == 'PRODUCTION' } }
 
             steps {
-
                 script {
 
                     if (params.ACTION.startsWith("ROLLBACK")) {
@@ -271,9 +242,7 @@ All Liquibase changesets MUST include rollback.
             }
         }
 
-        /* ================= APPROVAL ================= */
         stage('Approval Gate') {
-
             when { expression { params.ENVIRONMENT != 'DEV' } }
 
             steps {
@@ -283,9 +252,7 @@ All Liquibase changesets MUST include rollback.
             }
         }
 
-        /* ================= BACKUP ================= */
         stage('Database Backup') {
-
             when { expression { params.ENVIRONMENT == 'PRODUCTION' } }
 
             steps {
@@ -303,7 +270,6 @@ All Liquibase changesets MUST include rollback.
             }
         }
 
-        /* ================= DEPLOY ================= */
         stage('Deploy') {
 
             steps {
@@ -351,45 +317,14 @@ All Liquibase changesets MUST include rollback.
 
         success {
             echo "DEPLOYMENT SUCCESS"
-
-            emailext(
-                to: "rehan.ali9325@gmail.com",
-                subject: "Liquibase SUCCESS - ${params.ENVIRONMENT}",
-                body: """
-DEPLOYMENT SUCCESS
-
-${env.AUDIT}
-
-Action: ${params.ACTION}
-Environment: ${params.ENVIRONMENT}
-
-Build: ${env.BUILD_URL}
-"""
-            )
         }
 
         failure {
             echo "DEPLOYMENT FAILED"
-
-            emailext(
-                to: "rehan.ali9325@gmail.com",
-                subject: "Liquibase FAILED - ${params.ENVIRONMENT}",
-                body: """
-DEPLOYMENT FAILED
-
-${env.AUDIT}
-
-Action: ${params.ACTION}
-Environment: ${params.ENVIRONMENT}
-
-Build: ${env.BUILD_URL}
-"""
-            )
         }
 
         always {
             archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
         }
     }
-}
 }
