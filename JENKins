@@ -351,14 +351,46 @@ All Liquibase changesets MUST include rollback.
 
         success {
             echo "DEPLOYMENT SUCCESS"
+
+            emailext(
+                to: "rehan.ali9325@gmail.com",
+                subject: "Liquibase SUCCESS - ${params.ENVIRONMENT}",
+                body: """
+DEPLOYMENT SUCCESS
+
+${env.AUDIT}
+
+Action: ${params.ACTION}
+Environment: ${params.ENVIRONMENT}
+
+Build: ${env.BUILD_URL}
+"""
+            )
         }
 
         failure {
             echo "DEPLOYMENT FAILED"
+
+            emailext(
+                to: "rehan.ali9325@gmail.com",
+                subject: "Liquibase FAILED - ${params.ENVIRONMENT}",
+                body: """
+DEPLOYMENT FAILED
+
+${env.AUDIT}
+
+Action: ${params.ACTION}
+Environment: ${params.ENVIRONMENT}
+
+Build: ${env.BUILD_URL}
+"""
+            )
         }
 
         always {
             archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
         }
     }
+}
+}
 }
