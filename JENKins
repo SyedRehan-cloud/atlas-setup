@@ -332,16 +332,37 @@ Unsafe DELETE without WHERE detected in ${file}
                            ROLLBACK VALIDATION
                         ========================================= */
 
+                        /*
+                           Rollback required ONLY for risky operations
+                        */
+
+                        def riskyOperation =
+                            content.contains("drop") ||
+                            content.contains("alter table") ||
+                            content.contains("update") ||
+                            content.contains("delete") ||
+                            content.contains("procedure") ||
+                            content.contains("function")
+
                         if (
                             file.endsWith(".xml") &&
                             content.contains("<changeset") &&
+                            riskyOperation &&
                             !content.contains("<rollback>")
                         ) {
 
                             error("""
-Rollback block missing in ${file}
+Rollback block missing in risky changeset:
 
-All changesets must contain rollback.
+${file}
+
+Rollback is required for:
+- DROP
+- ALTER
+- UPDATE
+- DELETE
+- PROCEDURE
+- FUNCTION changes
 """)
                         }
                     }
