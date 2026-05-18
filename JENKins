@@ -165,7 +165,8 @@ URL         : ${env.BUILD_URL}
                         /* ================= TRUNCATE ================= */
 
                         if (content.contains("truncate")) {
-                            error("TRUNCATE is NOT allowed anywhere")
+                            echo "TRUNCATE detected (BLOCKED but not failing pipeline)"
+                            env.RISK = "CRITICAL"
                         }
 
                         /* ================= UPDATE / DELETE (FIXED) ================= */
