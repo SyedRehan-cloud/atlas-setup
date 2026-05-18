@@ -103,6 +103,45 @@ URL         : ${env.BUILD_URL}
 
                 script {
 
+                    /* ================= POLICY MATRIX ================= */
+
+                    def POLICY = [
+                        DEV: [
+                            truncate: "WARN",
+                            unsafeUpdate: "WARN",
+                            unsafeDelete: "WARN",
+                            dropTable: "WARN"
+                        ],
+                        STAGING: [
+                            truncate: "WARN",
+                            unsafeUpdate: "FAIL",
+                            unsafeDelete: "FAIL",
+                            dropTable: "WARN"
+                        ],
+                        PRODUCTION: [
+                            truncate: "FAIL",
+                            unsafeUpdate: "FAIL",
+                            unsafeDelete: "FAIL",
+                            dropTable: "FAIL"
+                        ]
+                    ]
+
+                    def checkRule = { rule, message, file ->
+
+                        def action = POLICY[params.ENVIRONMENT][rule]
+
+                        if (action == "FAIL") {
+                            error("${message} in ${file}")
+                        }
+
+                        if (action == "WARN") {
+                            echo "WARNING: ${message} in ${file}"
+                            env.RISK = "HIGH"
+                        }
+                    }
+
+                    /* ================= FILE SCAN ================= */
+
                     def files = sh(
                         script: "find . \\( -name '*.sql' -o -name '*.xml' \\)",
                         returnStdout: true
@@ -115,8 +154,6 @@ URL         : ${env.BUILD_URL}
                         echo "Scanning: ${file}"
 
                         def content = readFile(file).toLowerCase()
-
-                        /* ================= SAFE FLAGS ================= */
 
                         def isXML = file.endsWith(".xml")
 
@@ -151,40 +188,21 @@ URL         : ${env.BUILD_URL}
                         /* ================= DROP ================= */
 
                         if (content.contains("drop table")) {
-
-                            if (params.ENVIRONMENT == 'PRODUCTION')
-                                error("DROP TABLE blocked in PROD")
-
-                            input message: "DROP TABLE detected in ${file}. Approve?"
+                            checkRule("dropTable", "DROP TABLE detected", file)
                         }
 
                         if (content.contains("drop column")) {
                             input message: "DROP COLUMN detected in ${file}. Approve?"
                         }
 
-                        /* ================= TRUNCATE CONTROL ================= */
+                        /* ================= TRUNCATE ================= */
 
                         if (content.contains("truncate")) {
-
                             echo "TRUNCATE detected in ${file}"
-
-                            if (params.ENVIRONMENT == 'PRODUCTION') {
-
-                                error("""
-TRUNCATE is BLOCKED in PRODUCTION
-
-File: ${file}
-Environment: ${params.ENVIRONMENT}
-""")
-
-                            } else {
-
-                                echo "TRUNCATE allowed in ${params.ENVIRONMENT}"
-                                env.RISK = "HIGH"
-                            }
+                            checkRule("truncate", "TRUNCATE detected", file)
                         }
 
-                        /* ================= UPDATE / DELETE (FIXED) ================= */
+                        /* ================= UPDATE / DELETE ================= */
 
                         def unsafeUpdate =
                             content.contains("update") &&
@@ -192,7 +210,7 @@ Environment: ${params.ENVIRONMENT}
                             !content.contains(" where ")
 
                         if (unsafeUpdate) {
-                            error("Unsafe UPDATE without WHERE in ${file}")
+                            checkRule("unsafeUpdate", "Unsafe UPDATE without WHERE", file)
                         }
 
                         def unsafeDelete =
@@ -200,7 +218,7 @@ Environment: ${params.ENVIRONMENT}
                             !content.contains(" where ")
 
                         if (unsafeDelete) {
-                            error("Unsafe DELETE without WHERE in ${file}")
+                            checkRule("unsafeDelete", "Unsafe DELETE without WHERE", file)
                         }
 
                         /* ================= PROCEDURE ================= */
@@ -218,7 +236,7 @@ Environment: ${params.ENVIRONMENT}
                         if (content.contains("function"))
                             echo "FUNCTION detected"
 
-                        /* ================= ROLLBACK CHECK (FIXED) ================= */
+                        /* ================= ROLLBACK CHECK ================= */
 
                         if (isXML &&
                             content.contains("<changeset") &&
